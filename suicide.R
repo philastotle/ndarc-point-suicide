@@ -10,53 +10,11 @@ library(mice)
 library(VIM)
 
 # Load dataset 
-df <- read.spss('../../data/processed/core/PointCore.sav',
-                to.data.frame = T,
-                use.value.labels = F)
-
-# select variables of interest
-df <- df %>% 
-  select(
-    participant_id,
-    wave,
-    age,
-    sex,
-    maritalstatus,
-    employ,
-    employ_chnge_pain,
-    income_wk,
-    indig_yn,
-    bmi,
-    age,
-    sf12_mcs,
-    sf12_pcs,
-    phq9_severity,
-    gad_severity,
-    pharm_opioids_dep_icd10,
-    suicide_thoughts_12m,
-    suicide_attempt_12m,
-    mos_ss_avg,
-    who_qol_q1,
-    who_qol_q2,
-    totalopioiddose,
-    pods_tot,
-    antidepressant_week,
-    antipsychotic_week,
-    bpi_pscore,
-    wg_totscore,
-    num_chronic_cond_12m,
-    bpi_interference,
-    pseq_score,
-    slp9,
-    orbit_cont,
-    can_12m,
-    alc_12m,
-    cig_12m,
-    time_pain_weeks)
+df <- read.csv('data/core.csv', header=TRUE, sep=',')
 
 # Find number of suicidal users across entire dataset
 # 1. Find suicidal participants across all years
-suicide_user_df <- df[which(df$suicide_attempt_12m == 1),]
+suicide_user_df <- df[which(df$suicide_attempt_12m == 'Yes'),]
 # 2. Extract their id's
 suicide_users_id <- suicide_user_df$participant_id
 # 3. Create df of suicide users
