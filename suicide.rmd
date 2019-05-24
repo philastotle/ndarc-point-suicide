@@ -1,0 +1,227 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+# Import dependencies
+```{r}
+library(dplyr)
+library(ggplot2)
+library(foreign)
+library(lattice)
+library("mice")
+library("VIM")
+```
+
+## Core Data EDA and Analysis
+```{r}
+df <- read.spss('../../data/processed/core/PointCore.sav', to.data.frame = T, use.value.labels = F)
+
+df <- df %>% 
+  select(
+    participant_id,
+    wave,
+    age,
+    sex,
+    maritalstatus,
+    employ,
+    employ_chnge_pain,
+    income_wk,
+    indig_yn,
+    bmi,
+    age,
+    sf12_mcs,
+    sf12_pcs,
+    phq9_severity,
+    gad_severity,
+    pharm_opioids_dep_icd10,
+    suicide_thoughts_12m,
+    suicide_attempt_12m,
+    mos_ss_avg,
+    who_qol_q1,
+    who_qol_q2,
+    totalopioiddose,
+    pods_tot,
+    antidepressant_week,
+    antipsychotic_week,
+    bpi_pscore,
+    wg_totscore,
+    num_chronic_cond_12m,
+    bpi_interference,
+    pseq_score,
+    slp9,
+    orbit_cont,
+    can_12m,
+    alc_12m,
+    cig_12m,
+    time_pain_weeks)
+
+# Create baseline 
+baseline <- df[which(df$wave == 0),]
+```
+
+# suicide
+```{r}
+# 1. Find suicidal participants across all years
+suicide_user_df <- df[which(df$suicide_attempt_12m == 1),]
+# 2. Extract their id's
+suicide_users_id <- suicide_user_df$participant_id
+# 3. Create df of suicide users
+suicide_users_df <- subset(df, participant_id %in% suicide_users_id)
+cat('Number of suicidal users', sum(suicide_users_df$suicide_attempt_12m, na.rm=T))
+
+# 4. Calculate number of suicide and total dependent users in each wave
+print("Suicidal Attempts at each wave")
+for (i in 0:5){
+  tmp <- filter(suicide_users_df, wave==i)
+  tmp2 <- filter(df, wave==i)
+  tmp$wave <- factor(tmp$wave)
+  cat('\nWave', i,'=', sum(tmp$suicide_attempt_12m==1, na.rm=T))
+}
+```
+
+### Correlations
+```{r}
+
+# correlations
+library(corrplot)
+correlations <- cor(suicide_users_df[,2:15])
+corrplot(correlations, method='circle')
+
+variables <- names(baseline)
+
+for (i in 1:83) {
+  print(variables[i])
+  print(sum(baseline[, i], na.rm=T))
+}
+
+```
+
+### Model Selection
+```{r}
+baseline[baseline < 0] <- NA
+baseline[is.na(baseline)] <- 0
+
+logmod_full <- glm(suicide_attempt_12m ~ 
+  age+
+  sex+
+  maritalstatus+
+  employ+
+  employ_chnge_pain+
+  income_wk+
+  indig_yn+
+  bmi+
+  age+
+  sf12_mcs+
+  sf12_pcs+
+  phq9_severity+
+  gad_severity+
+  pharm_opioids_dep_icd10+
+  suicide_thoughts_12m+
+  mos_ss_avg+
+  who_qol_q1+
+  who_qol_q2+
+  totalopioiddose+
+  pods_tot+
+  antidepressant_week+
+  antipsychotic_week+
+  bpi_pscore+
+  wg_totscore+
+  num_chronic_cond_12m+
+  bpi_interference+
+  pseq_score+
+  slp9+
+  orbit_cont+
+  can_12m+
+  alc_12m+
+  cig_12m+
+  time_pain_weeks,
+              data = baseline, family= 'binomial', na.action=na.omit)
+
+logmod_reduced <- step(logmod_full, trace=1)
+summary(logmod_reduced)
+```
+
+## calibration
+```{r}
+library(dplyr)
+library(ggplot2)
+# add predicted probabilities to the data frame 
+baseline %>% mutate(predprob=predict(logmod_full, type="response"),
+                   linpred=predict(logmod_full)) %>%
+#group the data into bins based on the linear predictor fitted values 
+group_by(cut(linpred, breaks=unique(quantile(linpred, (1:50)/51)))) %>%
+
+  # summarise by bin
+  
+summarise(suicide_attempt_12m_bin=sum(suicide_attempt_12m), predprob_bin=mean(predprob), n_bin=n()) %>% # add the standard error of the mean predicted probaility for each bin
+mutate(se_predprob_bin=sqrt(predprob_bin*(1 - predprob_bin)/n_bin)) %>%
+  # plot it with 95% confidence interval bars 
+  ggplot(aes(x=predprob_bin, 
+           y=suicide_attempt_12m_bin/n_bin, 
+           ymin=suicide_attempt_12m_bin/n_bin - 1.96*se_predprob_bin,
+           ymax=suicide_attempt_12m_bin/n_bin + 1.96*se_predprob_bin)) +
+  geom_point() + geom_linerange(colour="orange", alpha=0.4) +
+  geom_abline(intercept=0, slope=1) +
+  labs(x="Predicted probability (binned)",
+       y="Observed proportion (in each bin)")
+
+```
+Appears to be randomly and evenly distributed and not deviating in any particular direction. 
+
+## Goodness of fit with the Hosmer–Lemeshow test
+```{r}
+baseline %>% mutate(predprob=predict(logmod_full, type="response"),
+                   linpred=predict(logmod_full)) %>%
+group_by(cut(linpred, breaks=unique(quantile(linpred, (1:50)/51)))) %>%
+summarise(suicide_attempt_12m_bin=sum(suicide_attempt_12m), predprob_bin=mean(predprob), n_bin=n()) %>%
+mutate(se_predprob_bin=sqrt(predprob_bin*(1 - predprob_bin)/n_bin)) -> hl_df
+
+hl_stat <- with(hl_df, sum( (suicide_attempt_12m_bin - n_bin*predprob_bin)^2 /
+                            (n_bin* predprob_bin*(1 - predprob_bin))))
+
+hl <- c(hosmer_lemeshow_stat=hl_stat, hl_degrees_freedom=nrow(hl_df) - 1)
+hl
+
+# calculate p-value
+c(p_val=1 - pchisq(hl[1], hl[2]))
+
+```
+Sig p indicates lack of fit. 
+
+```{r}
+print("Confusion matrix")
+baseline %>% mutate(predprob=predict(logmod_full, type="response")) %>%
+            mutate(pred_outcome=ifelse(predprob < 0.5, 0, 1)) -> baseline
+
+xtabs(~ suicide_thoughts_12m + pred_outcome, data=baseline)
+
+accuracy <- (6219 + 8) / (6219 + 0 + 1351 + 8)
+
+cat('\nClassification accuracy is ', accuracy)
+
+baseline$pred_outcome <- as.factor(baseline$pred_outcome)
+baseline$suicide_attempt_12m <- as.factor(baseline$suicide_attempt_12m)
+
+# add the predicted probailities to the data frame
+thresholds <- seq(0.01, 0.5, by=0.01)
+sensitivities <- numeric(length(thresholds))
+specificities <- numeric(length(thresholds))
+
+for (i in seq_along(thresholds)) {
+  pp <- ifelse(baseline$predprob < thresholds[i], "no", "yes")
+  xx <- xtabs( ~ suicide_attempt_12m + pp, data=baseline)
+  specificities[i] <- xx[1,1] / (xx[1,1] + xx[1,2])
+  sensitivities[i] <- xx[2,2] / (xx[2,1] + xx[2,2])
+}
+
+# plot the ROC
+plot(1 - specificities, sensitivities, type="l",
+        xlab="1 - Specificity", ylab="Sensitivity")
+abline(0,1, lty=2)
+
+
+```
+
