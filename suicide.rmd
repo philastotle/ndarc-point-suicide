@@ -26,51 +26,31 @@ baseline <- df[which(df$wave == 'Baseline'),]
 # suicide
 ```{r}
 # 1. Find suicidal participants across all years
-suicide_user_df <- df[which(df$suicide_attempt_12m == 1),]
+suicide_user_df <- df[which(df$suicide_attempt_12m == 'Yes'),]
 # 2. Extract their id's
 suicide_users_id <- suicide_user_df$participant_id
 # 3. Create df of suicide users
 suicide_users_df <- subset(df, participant_id %in% suicide_users_id)
-cat('Number of suicidal users', sum(suicide_users_df$suicide_attempt_12m, na.rm=T))
+cat('Number of suicidal users', sum((suicide_users_df$suicide_attempt_12m == 'Yes'), na.rm=T))
 
 # 4. Calculate number of suicide and total dependent users in each wave
 print("Suicidal Attempts at each wave")
-for (i in 0:5){
+n <- levels(df$wave)
+for (i in n){
   tmp <- filter(suicide_users_df, wave==i)
   tmp2 <- filter(df, wave==i)
   tmp$wave <- factor(tmp$wave)
-  cat('\nWave', i,'=', sum(tmp$suicide_attempt_12m==1, na.rm=T))
+  cat('\nWave', i,'=', sum(tmp$suicide_attempt_12m=='Yes', na.rm=T))
 }
-```
-
-### Correlations
-```{r}
-
-# correlations
-library(corrplot)
-correlations <- cor(suicide_users_df[,2:15])
-corrplot(correlations, method='circle')
-
-variables <- names(baseline)
-
-for (i in 1:83) {
-  print(variables[i])
-  print(sum(baseline[, i], na.rm=T))
-}
-
 ```
 
 ### Model Selection
 ```{r}
-baseline[baseline < 0] <- NA
-baseline[is.na(baseline)] <- 0
-
 logmod_full <- glm(suicide_attempt_12m ~ 
   age+
   sex+
   maritalstatus+
   employ+
-  employ_chnge_pain+
   income_wk+
   indig_yn+
   bmi+
@@ -99,10 +79,21 @@ logmod_full <- glm(suicide_attempt_12m ~
   alc_12m+
   cig_12m+
   time_pain_weeks,
-              data = baseline, family= 'binomial', na.action=na.omit)
+  data = baseline, family= 'binomial', na.action=na.omit)
 
-logmod_reduced <- step(logmod_full, trace=1)
-summary(logmod_reduced)
+options(scipen=999) # disable scientific notation
+summary(logmod_full)
+#logmod_reduced <- step(logmod_full, trace=1)
+#summary(logmod_reduced)
+
+# Adjust for non-convergence and use exact logistic regression to provide better estimates of B parameters
+# load library
+library(brglm)
+
+# re-fit model using brglm()
+br_iris_logmod <- brglm(Species ~ Sepal.Width + Sepal.Length, family=binomial, data=irisr)
+
+summary(br_iris_logmod)
 ```
 
 ## calibration
